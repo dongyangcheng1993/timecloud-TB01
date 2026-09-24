@@ -1,0 +1,52 @@
+name: Build FanchmWrt Timecloud
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: fanchmwrt/fanchmwrt
+          ref: master
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib gnutls-dev libelf-dev libssl-dev libncurses-dev \
+            libtool-bin zlib1g-dev wget cpio unzip rsync file python3 python3-setuptools
+
+      - name: Update and install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure
+        run: |
+          make defconfig
+          echo "=== defconfig 后的 TARGET ==="
+          grep "^CONFIG_TARGET" .config
+          cat >> .config <<'EOF'
+          CONFIG_TARGET_ramips=y
+          CONFIG_TARGET_ramips_mt7621=y
+          CONFIG_TARGET_ramips_mt7621_thunder_timecloud=y
+          EOF
+          make defconfig
+          echo "=== 最终验证 ==="
+          grep "thunder_timecloud" .config && echo "OK: timecloud selected" || { echo "ERROR: timecloud NOT selected!"; exit 1; }
+          grep "adslr" .config && echo "WARN: adslr also selected" || echo "OK: adslr not selected"
+
+      - name: Download
+        run: make download -j$(nproc)
+
+      - name: Build
+        run: make -j$(nproc) V=s
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: timecloud-firmware
+          path: bin/targets/ramips/mt7621/*.bin
