@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Clone FanchmWrt
         run: |
-          git clone -b master --depth 1 https://github.com/fanchmwrt/fanchmwrt.git .
+          git clone -b fanchmwrt-25.12.4 --depth 1 https://github.com/fanchmwrt/fanchmwrt.git .
 
       - name: Install dependencies
         run: |
