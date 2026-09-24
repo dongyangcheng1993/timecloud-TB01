@@ -3,26 +3,27 @@ name: Build FanchmWrt Timecloud
 on:
   workflow_dispatch:
 
+env:
+  DEBIAN_FRONTEND: noninteractive
+
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@main
-
       - name: Install dependencies
         run: |
-          sudo apt update
-          sudo apt install -y build-essential clang flex bison g++ gawk \
-            gcc-multilib gnutls-dev libelf-dev libssl-dev libncurses-dev \
-            libtool-bin zlib1g-dev wget cpio unzip rsync file python3 python3-setuptools
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib \
+            gnutls-dev libelf-dev libssl-dev libncurses-dev libtool-bin \
+            zlib1g-dev wget cpio unzip rsync file python3 python3-setuptools \
+            device-tree-compiler libltdl-dev git curl ca-certificates
 
       - name: Clone FanchmWrt
         run: |
-          git clone -b fanchmwrt-25.12.4 --depth 1 https://github.com/fanchmwrt/fanchmwrt.git repo
-          shopt -s dotglob
-          mv repo/* .
-          rm -rf repo
+          git clone -b fanchmwrt-25.12.4 --depth 1 https://github.com/fanchmwrt/fanchmwrt.git .
+          echo "--- 当前目录 ---"
+          pwd && ls -la
 
       - name: Update and install feeds
         run: |
@@ -31,23 +32,30 @@ jobs:
 
       - name: Configure
         run: |
+          # 1) 先生成默认配置
           make defconfig
-          echo "=== 列出所有 DEVICE 符号 ==="
-          grep -o 'CONFIG_TARGET_ramips_mt7621_DEVICE_[a-z0-9_]*' .config | sort -u || true
-          echo "=== 写入 timecloud ==="
-          sed -i 's/^CONFIG_TARGET_ramips_mt7621_DEVICE_.*=y/# & is not set/' .config
+          # 2) 按正确顺序写入：平台 → 子目标 → 设备
+          echo 'CONFIG_TARGET_ramips=y' >> .config
+          echo 'CONFIG_TARGET_ramips_mt7621=y' >> .config
           echo 'CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y' >> .config
+          # 3) 展开依赖
           make defconfig
-          echo "=== 验证 ==="
-          grep -q 'CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y' .config && echo "OK" || { echo "FAILED"; exit 1; }
+          # 4) 校验
+          echo "=== 关键配置 ==="
+          grep -E '^CONFIG_TARGET_ramips(=|_) ' .config || true
+          echo "=== 验证选中设备 ==="
+          grep -E '^CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y$' .config \
+            && echo "OK: thunder_timecloud 已选中" \
+            || { echo "FAILED: 未选中"; exit 1; }
+          echo "=== 确认 adslr_g7 未选中 ==="
+          grep -E '^CONFIG_TARGET_ramips_mt7621_DEVICE_adslr_g7=y$' .config \
+            && { echo "FAILED: adslr_g7 仍被选中"; exit 1; } || echo "OK: adslr_g7 未选中"
 
       - name: Download
-        run: |
-          make download -j$(nproc)
+        run: make download -j$(nproc)
 
       - name: Build
-        run: |
-          make -j$(nproc) V=s
+        run: make -j$(nproc) V=s
 
       - name: Upload
         uses: actions/upload-artifact@v4
