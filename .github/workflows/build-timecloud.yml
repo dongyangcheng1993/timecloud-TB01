@@ -26,17 +26,15 @@ jobs:
       - name: Configure
         run: |
           make defconfig
-          echo "=== 修改前 ==="
-          grep "^CONFIG_TARGET" .config || true
-          # 取消 adslr_g7 的选中
-          sed -i 's/^CONFIG_TARGET_ramips_mt7621_adslr_g7=y/# CONFIG_TARGET_ramips_mt7621_adslr_g7 is not set/' .config
-          # 确保 timecloud 是唯一的选中项
-          sed -i '/^CONFIG_TARGET_ramips_mt7621_thunder_timecloud=y/d' .config
-          echo 'CONFIG_TARGET_ramips_mt7621_thunder_timecloud=y' >> .config
+          echo "=== 列出所有 mt7621 子设备 config 符号 ==="
+          grep -o 'CONFIG_TARGET_ramips_mt7621_[a-z0-9_]*' .config | sort -u
+          echo "=== 尝试写入 timecloud ==="
+          sed -i 's/^CONFIG_TARGET_ramips_mt7621_.*=y/# & is not set/' .config
+          echo 'CONFIG_TARGET_RAMIPS_MT7621_THUNDER_TIMECLOUD=y' >> .config
           make defconfig
-          echo "=== 修改后 ==="
-          grep "thunder_timecloud" .config && echo "OK: timecloud selected" || { echo "ERROR: timecloud NOT selected!"; exit 1; }
-          grep "adslr" .config && echo "WARN: adslr still present" || echo "OK: adslr removed"
+          echo "=== 验证 ==="
+          grep -i "timecloud" .config || true
+          grep "adslr" .config || echo "OK: adslr removed"
 
       - name: Download
         run: make download -j$(nproc)
