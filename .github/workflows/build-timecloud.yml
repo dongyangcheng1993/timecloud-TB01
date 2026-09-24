@@ -7,10 +7,9 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-        with:
-          repository: fanchmwrt/fanchmwrt
-          ref: master
+      - name: Clone FanchmWrt
+        run: |
+          git clone -b master --depth 1 https://github.com/fanchmwrt/fanchmwrt.git .
 
       - name: Install dependencies
         run: |
