@@ -1,0 +1,61 @@
+name: Build iStoreOS Timecloud
+
+on:
+  workflow_dispatch:
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib \
+            gnutls-dev libelf-dev libssl-dev libncurses-dev libtool-bin \
+            zlib1g-dev wget cpio unzip rsync file python3 python3-setuptools \
+            device-tree-compiler libltdl-dev git curl ca-certificates
+
+      - name: Clone iStoreOS
+        run: |
+          git clone -b istoreos-24.10 --depth 1 https://github.com/istoreos/istoreos.git .
+          echo "--- 当前目录 ---"
+          pwd && ls -la
+
+      - name: Add iStore feed
+        run: |
+          echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+
+      - name: Update and install feeds
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Configure
+        run: |
+          make defconfig
+          echo 'CONFIG_TARGET_ramips=y' >> .config
+          echo 'CONFIG_TARGET_ramips_mt7621=y' >> .config
+          echo 'CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y' >> .config
+          echo 'CONFIG_PACKAGE_luci-app-store=y' >> .config
+          echo 'CONFIG_PACKAGE_luci-theme-istore=y' >> .config
+          make defconfig
+          echo "=== 验证选中设备 ==="
+          grep -E '^CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y$' .config \
+            && echo "OK: thunder_timecloud 已选中" \
+            || { echo "FAILED: 未选中"; exit 1; }
+
+      - name: Download
+        run: make download -j$(nproc)
+
+      - name: Build
+        run: make -j$(nproc) V=s
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: timecloud-istoreos-firmware
+          path: bin/targets/ramips/mt7621/*.bin
