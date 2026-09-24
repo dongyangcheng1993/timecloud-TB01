@@ -20,8 +20,9 @@ jobs:
       - name: Clone FanchmWrt
         run: |
           git clone -b fanchmwrt-25.12.4 --depth 1 https://github.com/fanchmwrt/fanchmwrt.git repo
-          mv repo/* repo/.[!.]* . 2>/dev/null || true
-          rmdir repo
+          shopt -s dotglob
+          mv repo/* .
+          rm -rf repo
 
       - name: Update and install feeds
         run: |
@@ -41,10 +42,12 @@ jobs:
           grep -q 'CONFIG_TARGET_ramips_mt7621_DEVICE_thunder_timecloud=y' .config && echo "OK" || { echo "FAILED"; exit 1; }
 
       - name: Download
-        run: make download -j$(nproc)
+        run: |
+          make download -j$(nproc)
 
       - name: Build
-        run: make -j$(nproc) V=s
+        run: |
+          make -j$(nproc) V=s
 
       - name: Upload
         uses: actions/upload-artifact@v4
