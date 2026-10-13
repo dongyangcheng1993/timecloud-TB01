@@ -14,9 +14,12 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 350
+    # 2026-09-23 起 runner 已移除 Node 20，这里显式锁定 Node 24，避免回退到已删除的运行时
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install dependencies
         run: |
@@ -25,12 +28,19 @@ jobs:
             build-essential clang flex bison g++ gawk gcc-multilib \
             gnutls-dev libelf-dev libssl-dev libncurses-dev libtool-bin \
             zlib1g-dev wget cpio unzip rsync file python3 python3-setuptools \
-            device-tree-compiler libltdl-dev git curl ca-certificates ccache
-          sudo /usr/sbin/update-alternatives --install /usr/bin/clang clang /usr/lib/ccache/clang 100
+            device-tree-compiler libltdl-dev git curl ca-certificates ccache \
+            pkg-config
+          # ccache 通过前缀方式包裹编译器（无需 update-alternatives，规避该命令缺失/报错）
+          export CCACHE_DIR="$HOME/.ccache"
           ccache -M 5G
+          clang --version
+          ccache --version
+          # 确认 PATH 中 ccache 优先于编译器
+          command -v clang
+          command -v ccache
 
       - name: ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.ccache
@@ -57,6 +67,7 @@ jobs:
       - name: Inject uci-defaults
         run: |
           mkdir -p files/etc/uci-defaults
+          cat > files/etc/uci-defaults/99-setup-bypass-router.sh << 'UCI_SCRIPT'
           #!/bin/sh
           # 旁路由首次启动配置：LAN 静态 IP、关 DHCP、关 IPv6
           # 执行成功后由 /etc/uci-defaults 机制自动删除本文件
@@ -79,7 +90,9 @@ jobs:
           echo "nameserver 192.168.1.1" > /etc/resolv.conf
           logger -t bypass-setup "LAN=192.168.1.111 gw=192.168.1.1 dhcpv6=disabled"
           exit 0
+          UCI_SCRIPT
           chmod +x files/etc/uci-defaults/99-setup-bypass-router.sh
+          echo '=== 旁路由脚本已写入 ==='
           ls -l files/etc/uci-defaults/
 
       - name: Configure
@@ -200,16 +213,20 @@ jobs:
       - name: Build
         if: ${{ env.CACHE_WARMUP != 'true' }}
         run: |
-          make -j$(nproc) V=s 2>&1 | tee build.log
+          set -o pipefail
+          : > build.log
+          make -j$(nproc) V=s CC="ccache clang" CXX="ccache clang++" > >(tee -a build.log) 2> >(tee -a build.log >&2)
           echo '=== 产物 ==='
           ls -lh bin/targets/ramips/mt7621/ 2>/dev/null || true
 
       - name: Size guard
         if: ${{ env.CACHE_WARMUP != 'true' }}
         run: |
-          python3 - << 'PY'
-          import glob, os
-          cands = glob.glob('bin/targets/ramips/mt7621/*.bin') + glob.glob('bin/targets/ramips/mt7621/*.img')
+          python3 - "$PWD" << 'PY'
+          import glob, os, sys
+          base = sys.argv[1]
+          pat = os.path.join(base, 'bin/targets/ramips/mt7621/*.bin')
+          cands = glob.glob(pat) + [f for f in glob.glob(os.path.join(base, 'bin/targets/ramips/mt7621/*.img'))]
           syst = [f for f in cands if 'sysupgrade' in f]
           if not syst:
               print("!! 未找到 sysupgrade 镜像，请检查编译输出")
@@ -223,9 +240,19 @@ jobs:
           print("✅ 体积安全")
           PY
 
+      - name: Upload artifact (兜底：产物缺失时上传目录清单)
+        if: ${{ env.CACHE_WARMUP != 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-artifacts
+          path: |
+            bin/targets/ramips/mt7621/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Upload artifact
         if: ${{ env.CACHE_WARMUP != 'true' }}
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v6
         with:
           name: timecloud-firmware
           path: |
@@ -234,7 +261,7 @@ jobs:
 
       - name: Upload build log on failure
         if: failure()
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v6
         with:
           name: build-log
           path: build.log
